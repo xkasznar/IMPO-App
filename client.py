@@ -108,6 +108,8 @@ def pattern_id(arr_x, arr_y):
             new_arr[mv_arr_it:arr_it] = -3
         elif bl_count == 2:
             new_arr[mv_arr_it:arr_it] = -2
+        elif bl_count == 1:
+            pass
         else:  # +-x and +-y logic
             if -1 in xslice:
                 new_arr[mv_arr_it:arr_it] = 1
