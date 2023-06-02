@@ -237,7 +237,10 @@ def on_button3_click(func_fig, func_ax, func_line, func_Y):
 
         for i in range(8):
             func_line[i].set_ydata(func_Y[i])
-        if total_fr % int(sfloat(pidw.get()) / LATENCY) == 0:
+        lat_ratio = int(sfloat(pidw.get()) / LATENCY)
+        if lat_ratio == 0:
+            lat_ratio = 1
+        if total_fr % lat_ratio == 0:
             func_line[8].set_ydata(func_Y[8])
             parse_instr(func_Y[8][-1])
         total_fr += 1
