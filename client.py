@@ -1,108 +1,119 @@
+# How to get IMPO App running?
 # 1. Install latest Python
-# 2. Write in command prompt: pip install matplotlib,scipy
-# 3. First launch client.py and press button 1 or 2 and crash 33 (this interaction create cyclic dep of server)
-# 4. Now launch server.py and optionally close (first launch creates cyclic dep of client)
-# 5. Now launch client.py and use normally. From now on client and server are launchable and closable in ANY order,
-# ANYTIME, run only one instance of each though.
-# 5a. button 1 is for converting .mat to .txt, then moving it in root and listening to serverout.txt regen'd by server
-# 5b. button 2 is just moving an already ASCII .txt to root and otherwise same
-# 5c. button 3 is just listening to serverout.txt
-import numpy  # inner graph workings logic and more
-import tkinter  # for graph creation logic and more
-import matplotlib.pyplot as plt  # later for graph creation logic
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # later for graph creation logic
-from tkinter import filedialog  # for buttons 1 and 2
-import os  # later for buttons 1, 2 and 3
-import scipy.io as sio  # later for button 1
-from scipy.ndimage import gaussian_filter  # for button 3
-from matplotlib.animation import FuncAnimation  # later for button 3
+# 2. Write in command prompt: pip install scipy, after that pip install numpy
+# 3. First launch client.py and press button 1 or 2 with prepared .mat or .txt substrate (this interaction creates dep of internal server and listens to it)
+# 4. Button 3 is just for reading the old substrate.
+import tkinter
+from tkinter import filedialog
+import turtle
+import os
+import time
+import scipy
+import numpy as np
 
-# slider consts and graph materialisation consts
+# graph math consts
 SIGMA0 = 32.0
-SDX_SKEW0 = 2.3
-SENSIT0 = 0.8
-PIDW0 = 1.5  # s
+GDX_GAIN0 = 2.3
+THRESHOLD0 = 0.8 # µV/sample
+PIDM0 = 3 #
 
-ROW_RATE = 256  # rows / s
-LATENCY = 0.5  # s
-CACHE_SIZE = 10  # s
+# graph materialisation consts
+RPS = 256 # rows / s
+SPP = 0.5
+RPP = int(RPS * SPP)
+SPB = 10 # s
+RPB = int(RPS * SPB)
+YSECTIONS = 7
+PG_COMPR0 = 32
+PG_USEAVERAGING = True
+bankit = 0
+ot = time.time()
+play = True
+reverse = False
 
-# app aesthetics, buttons aesthetic, sliders aesthetic
-APP_NAME = "IMPO App v0.8"
-DEFAULT_FONT = "TkDefaultFont"
-DEFAULT_FONT_SIZE = 18
-SPINBOX_START = 0.05
-SPINBOX_END = 500.0
-SPINBOX_WIDTH = 7
+play = True
+# app name, common font, spinbox and turtle consts
+APP_OBJECT_NAME = 'IMPO App v0.925' #->0.95 pygame konverzka, ->0.975 preprodukcia
+COMMON_FONT = 'TkDefaultFont'
+COMMON_FONT_BASE_SIZE = 20
+SPINBOX_MIN_VAL = 0.01
+SPINBOX_MAX_VAL = 500
+SPINBOX_INCR_VAL = 0.1
+SPINBOX_WIDTH = 10
+SPINBOX_FALLBACK_VAL = 1
+TURTLE_WIDTH = 1300
+TURTLE_HEIGHT = 890
+TURTLE_PAD = 30
+GRAPH_COLS = 2
+GRAPH_ROWS = 6
+GRAPH_WIDTH = TURTLE_WIDTH / GRAPH_COLS - TURTLE_PAD
+GRAPH_HEIGHT = TURTLE_HEIGHT / GRAPH_ROWS - TURTLE_PAD
 
-
-########################################################################################################################
-# inner graph workings logic
-# processed globals are better kept within sane range
+####################################################################################################
+# first half of screen 1/4: graph maths
+# in: entered string Q number in either spinbox
+# out: if parseable and within range converted float Q, if not fallback float Q
 def sfloat(s):
     try:
-        if not (SPINBOX_START <= float(s) <= SPINBOX_END):
-            return 1.0
+        f = float(s)
+        if SPINBOX_MIN_VAL <= f <= SPINBOX_MAX_VAL:
+            return f
         else:
-            return float(s)
+            return SPINBOX_FALLBACK_VAL
     except ValueError:
-        return 1.0
-
-
-# multiplies smoothened differentiated x ndarray so that equivalent eye movement qualifies same absolute value
-def skew(arr):
-    global sdx_skew
-    new_arr = arr * sfloat(sdx_skew.get())
-    return new_arr
-
-
-# absolute signal value below noise threshold or dominated by ref signal is muted, else its polarity is noted
-def alt_sign(arr, arr_ref):
-    global sensit
-    new_arr = numpy.empty(0)
-    for val, val_ref in zip(arr, arr_ref):
-        if abs(val) < sfloat(sensit.get()) or abs(val) < abs(val_ref):
-            new_val = 0
-        else:
-            new_val = numpy.sign(val)
-        new_arr = numpy.append(new_arr, new_val)
-    return new_arr
-
-
-# for intent of telling apart directions peaks for pattern identifier, same polarity is squashed in ndarray
+        return SPINBOX_FALLBACK_VAL
+# in: np array of float Q
+# out: np array smoothened using method Gaussian blur
+# why: gain information about overall tendency
+def gaussify(arr):
+    return scipy.ndimage.gaussian_filter(arr, sigma=sfloat(sigma_spinbox.get()))
+# in: np array of float Q
+# out: np array multiplied by scalar
+# why: equivalent eye mv must qualify same abs value
+def amplify(arr):
+    return arr * sfloat(gdx_gain_spinbox.get())
+# in: np array of float Q
+# out: np array of 0's where sig is noise and sig where it isn't
+# why: get rid of noise
+def kat(arr):
+    return np.where(np.abs(arr) < sfloat(threshold_spinbox.get()), 0, arr)
+# in: np array of float Q
+# out: np array of 0's where sig isn't dominant x vs. y or y vs. x
+# and -1's=l/d and +1's=r/u in respective array where that's dominant signal
+# why: limit movement to 90 degree grid, pick strongest signal
+def strong_sign(arr, arr_ref):
+    return np.where(np.abs(arr) < np.abs(arr_ref), 0, np.sign(arr))
+# in: np array of float {-1, 0, 1}
+# out: np array of float {-1, 0, 1}, but the consecutives are merged to single
+# why: atomise trend on the graph
 def squash_same_polarity(arr):
-    new_arr = numpy.empty(0)
+    new_arr = np.empty(len(arr))
     if len(arr) == 0:
         return new_arr
-    start = 0
-    while arr[start] == 0:
-        start += 1
-    new_arr = numpy.append(new_arr, numpy.sign(arr[start]))
-    for arr_it in range(start + 1, len(arr)):
-        if numpy.sign(new_arr[-1]) == -numpy.sign(arr[arr_it]):
-            new_arr = numpy.append(new_arr, numpy.sign(arr[arr_it]))
+    new_arr[0] = arr[0]
+    cnt = 1
+    for i in range(1, len(arr)):
+        if np.sign(arr[i - 1]) != np.sign(arr[i]):
+            new_arr[cnt] = np.sign(arr[i])
+            cnt += 1
+    new_arr.resize(cnt)
     return new_arr
-
-
-# for intent of pattern identifier, count up unique pairings of opposing poles
+# in: np array of float {-1, 0, 1}
+# out: np array of courses of action var 'samples' large
+# float {-3, -2, 0, 1, 2, 3, 4}
 def count_polar_pairs(arr):
-    pos_cnt = numpy.sum(arr == 1)
-    neg_cnt = numpy.sum(arr == -1)
+    pos_cnt = np.sum(arr == 1)
+    neg_cnt = np.sum(arr == -1)
     return min(pos_cnt, neg_cnt)
-
-
-# identifies gestures by priority TBL > DBL > stronger direction signal > inaction (-3, -2, 1234, 0)
-def pattern_id(arr_x, arr_y):
-    global pidw
-    samples = int(sfloat(pidw.get()) * ROW_RATE)
-
-    new_arr = numpy.zeros(len(arr_x))
+def pid(arr_x, arr_y, arr_bl):
+    new_arr = np.zeros(len(arr_x))
+    samples = max(1,int(sfloat(pidm_spinbox.get())))*RPP
     arr_it = len(arr_x)
     while arr_it >= 0:
         mv_arr_it = max(0, arr_it - samples)
         xslice = arr_x[mv_arr_it:arr_it]
         yslice = arr_y[mv_arr_it:arr_it]
-        bl_count = count_polar_pairs(xslice)
+        bl_count = count_polar_pairs(squash_same_polarity(np.sign(arr_bl)))
 
         if bl_count >= 3:
             new_arr[mv_arr_it:arr_it] = -3
@@ -110,7 +121,7 @@ def pattern_id(arr_x, arr_y):
             new_arr[mv_arr_it:arr_it] = -2
         elif bl_count == 1:
             pass
-        else:  # +-x and +-y logic
+        else:
             if -1 in xslice:
                 new_arr[mv_arr_it:arr_it] = 1
             if 1 in xslice:
@@ -121,269 +132,326 @@ def pattern_id(arr_x, arr_y):
                 new_arr[mv_arr_it:arr_it] = 4
         arr_it -= samples
     return new_arr
-
-
-########################################################################################################################
-# graph creation logic
-def start_graph(root_frame):
-    graph_frame = tkinter.Frame(root_frame)
-    graph_frame.grid(column=0, row=1, columnspan=6)
-    func_fig = plt.figure(figsize=(8, 8))
-    func_fig.subplots_adjust(top=0.97, bottom=0.03, left=0.07, right=1, hspace=0.4)
-
-    canvas = FigureCanvasTkAgg(func_fig, master=graph_frame)
-    canvas.get_tk_widget().pack()
-
-    func_ax = func_fig.subplots(5, 2)
-    func_X = numpy.linspace(-CACHE_SIZE, 0, CACHE_SIZE * ROW_RATE)
-    func_ax[0, 0].set_title("x")
-    func_ax[0, 1].set_title("y")
-    func_ax[1, 0].set_title("differentiate->x")
-    func_ax[1, 1].set_title("differentiate->y")
-    func_ax[2, 0].set_title("skew->smoothen->dx")
-    func_ax[2, 1].set_title("smoothen->dy")
-    func_ax[3, 0].set_title("alt_sign->ssdx")
-    func_ax[3, 1].set_title("alt_sign->sdy")
-    func_ax[4, 0].set_title("pattern_id->assdx,asdy")
-    func_ax[4, 0].set_yticks([-3, -2, 0, 1, 2, 3, 4])
-    func_ax[4, 0].set_yticklabels(["TBL", "DBL", "NOACT", "LEFT", "RIGHT", "DOWN", "UP"])
-    func_ax[4, 0].set_ylim([-3 * 1.1, 4 * 1.1])
-    func_ax[4, 1].set_visible(False)
-
-    func_Y = [None] * 9
-    for i in range(2):
-        func_Y[i] = numpy.zeros(CACHE_SIZE * ROW_RATE)
-    for i in range(7):
-        func_Y[i + 2] = numpy.zeros(CACHE_SIZE * ROW_RATE - 1)
-
-    func_line = [None] * 9
-    func_line[0], = func_ax[0, 0].plot(func_X, func_Y[0])
-    func_line[1], = func_ax[0, 1].plot(func_X, func_Y[1])
-    func_X = func_X[:-1]
-    func_line[2], = func_ax[1, 0].plot(func_X, func_Y[2])
-    func_line[3], = func_ax[1, 1].plot(func_X, func_Y[3])
-    func_line[4], = func_ax[2, 0].plot(func_X, func_Y[4])
-    func_line[5], = func_ax[2, 1].plot(func_X, func_Y[5])
-    func_line[6], = func_ax[3, 0].plot(func_X, func_Y[6])
-    func_line[7], = func_ax[3, 1].plot(func_X, func_Y[7])
-    func_line[8], = func_ax[4, 0].plot(func_X, func_Y[8])
-    return func_fig, func_ax, func_line, func_Y
-
-
-# 1st button logic
+####################################################################################################
+# first half of screen 2/4: graph materialisation
+def get_t_home(i, j):
+    x = -TURTLE_WIDTH/2 + j * (GRAPH_WIDTH + TURTLE_PAD)
+    y = TURTLE_HEIGHT/2 - (i+1) * (GRAPH_HEIGHT + TURTLE_PAD) + TURTLE_PAD*4/5
+    return x, y
+def ground_t(t, i, j):
+    x, y = get_t_home(i, j)
+    t.setpos(x, y)
+def t_line(t, x1, y1, x2, y2):
+    t.setpos(x1, y1)
+    t.pendown()
+    t.setpos(x2, y2)
+    t.penup()
+def t_axes(t, x, y, capt):
+    t_line(t, x, y, x + GRAPH_WIDTH, y)
+    t_line(t, x + GRAPH_WIDTH, y, x + GRAPH_WIDTH, y + GRAPH_HEIGHT)
+    t.setpos(x + GRAPH_WIDTH/2, y + GRAPH_HEIGHT - TURTLE_PAD/3)
+    t.write(capt)
+def t_static_tick(t, x, y, is_xtick, capt):
+    if is_xtick:
+        t_line(t, x, y - TURTLE_PAD/3, x, y + TURTLE_PAD/3)
+        t.setpos(x, y - 2*TURTLE_PAD/3)
+        t.write(capt)
+    else:    
+        t_line(t, x - TURTLE_PAD/3, y, x + TURTLE_PAD/3, y)
+        #t.setpos(x - GRAPH_WIDTH/SPB, y - TURTLE_PAD/3)
+        #t.write(capt)
+def t_awt(t, i, j, capt):
+    home_x, home_y = get_t_home(i, j)
+    t_axes(t, home_x, home_y, capt)
+    xit, yit = 0, 0
+    for xit in range(SPB + 1):
+        t_static_tick(t, home_x + GRAPH_WIDTH * xit/SPB, home_y, True, xit-SPB)
+    for yit in range(YSECTIONS + 1):
+        t_static_tick(t, home_x + GRAPH_WIDTH, home_y + GRAPH_HEIGHT * yit/YSECTIONS, False, 'unused')
+def t_awts(t, c2da):
+    for i in range(GRAPH_ROWS):
+        for j in range(GRAPH_COLS):
+            if i == 5 and j == 1:
+                break
+            t_awt(t, i, j, c2da[i][j])
+def map_data(i, j, data, dit):
+    home_x, home_y = get_t_home(i, j)
+    xbounds1, xbounds2 = [0, len(data) - 1], [home_x, home_x + GRAPH_WIDTH]
+    ybounds1, ybounds2 = [min(data), max(data)], [home_y, home_y + GRAPH_HEIGHT]
+    x = np.interp(dit, xbounds1, xbounds2)
+    y = np.interp(data[dit], ybounds1, ybounds2)
+    return x, y
+def t_pop_graph(t, i, j, data):
+    pc = max(4,int(sfloat(pg_compr_spinbox.get())))
+    if PG_USEAVERAGING:
+        while len(data)%pc != 0:
+            data = data[:-1]
+        data = np.mean(data.reshape(-1, pc), axis = 1)
+    else:
+        data = data[::pc]
+    for dit in range(len(data) - 1):
+        x1, y1 = map_data(i, j, data, dit)
+        x2, y2 = map_data(i, j, data, dit + 1)
+        t_line(t, x1, y1, x2, y2)
+    #optimisations won't be needed in pygame
+def t_pop_graphs(t, d2da):
+    for i in range(GRAPH_ROWS):
+        for j in range(GRAPH_COLS):
+            if i == 5 and j == 1:
+                break
+            t_pop_graph(t, i, j, d2da[i, j])
+def t_pop_ytick(t, i, j, data):
+    home_x, home_y = get_t_home(i, j)
+    yticksinfo = np.percentile([min(data), max(data)], np.linspace(0, 100, YSECTIONS+1))
+    for ytiit in range(len(yticksinfo)):
+        x = home_x + GRAPH_WIDTH
+        y = home_y + GRAPH_HEIGHT * ytiit/(len(yticksinfo)-1)
+        t.setpos(x - GRAPH_WIDTH/SPB, y - TURTLE_PAD/3)
+        t.write(round(yticksinfo[ytiit], 1))
+def t_pop_yticks(t, d2da):
+    for i in range(GRAPH_ROWS):
+        for j in range(GRAPH_COLS):
+            if i == 5 and j == 1:
+                break
+            t_pop_ytick(t, i, j, d2da[i, j])
+def init_z2da(rows, cols, cnt_zeros):
+    z2da = np.empty((rows, cols), dtype=object)
+    for i in range(rows):
+        for j in range(cols):
+            z2da[i, j] = np.zeros(cnt_zeros)
+    return z2da
+def init_graphs():
+    global turtle_screen, t_professor, t_tickscribe, bank, d2da
+    tkinter_canvas = tkinter.Canvas(app_object, width=TURTLE_WIDTH, height=TURTLE_HEIGHT)
+    tkinter_canvas.grid(row=1, column=0, columnspan=6)
+    
+    turtle_screen = turtle.TurtleScreen(tkinter_canvas)
+    turtle_screen.tracer(False)
+    t_grunt = turtle.RawTurtle(turtle_screen)
+    t_grunt.penup()
+    t_grunt.hideturtle()
+    t_awts(t_grunt, [['x','y'],['dx','dy'],['agdx','gdy'],['kgdx','kgdy'],['skgdx','skgdy'],['pid','unused']])
+    
+    t_professor = turtle.RawTurtle(turtle_screen)
+    t_professor.penup()
+    t_professor.hideturtle()
+    t_professor.pencolor('blue')
+    
+    t_tickscribe = turtle.RawTurtle(turtle_screen)
+    t_tickscribe.penup()
+    t_tickscribe.hideturtle()
+    
+    serverin_name = 'serverin.txt'
+    if os.path.exists(serverin_name):
+        bank = np.genfromtxt(serverin_name, delimiter='\t')
+    else:
+        input('serverin.txt not found, please make it with button 1 or 2')
+    d2da = init_z2da(GRAPH_ROWS, GRAPH_COLS, RPB)
+def update_graphs():
+    global bankit, ot
+    if bankit < 0 or bankit >= len(bank):
+        bankit = 0
+    start = bankit
+    stop = bankit + RPP
+    banklet = bank[start:stop].T
+    if play:
+        d2da[0][0] = np.concatenate((d2da[0][0][RPP:], banklet[0]))
+        d2da[0][1] = np.concatenate((d2da[0][1][RPP:], banklet[1]))
+    d2da[1][0] = np.diff(d2da[0][0])
+    d2da[1][1] = np.diff(d2da[0][1])
+    d2da[2][0] = amplify(gaussify(d2da[1][0]))
+    d2da[2][1] = gaussify(d2da[1][1])
+    d2da[3][0] = kat(d2da[2][0])
+    d2da[3][1] = kat(d2da[2][1])
+    d2da[4][0] = strong_sign(d2da[3][0], d2da[3][1])
+    d2da[4][1] = strong_sign(d2da[3][1], d2da[3][0])
+    d2da[5][0] = pid(d2da[4][0], d2da[4][1], d2da[3][0])
+    frame = max(1,int(sfloat(pidm_spinbox.get())))
+    if bankit % frame == 0:
+        on_pid_instr(d2da[4][0][-1])
+    t_professor.clear()
+    t_pop_graphs(t_professor, d2da)
+    t_tickscribe.clear()
+    t_pop_yticks(t_tickscribe, d2da)
+    home_x, home_y = get_t_home(0,0)
+    t_tickscribe.setpos(home_x, home_y + GRAPH_HEIGHT - TURTLE_PAD/3)
+    t_tickscribe.write(bankit/RPS)
+    turtle_screen.update()
+    
+    if play:
+        if not reverse:
+            bankit += RPP
+        else:
+            bankit -= RPP
+    nt = time.time()-ot
+    ot = time.time()
+    x = max(0, int(1000*(SPP - nt)))
+    app_object.after(x, update_graphs)
+####################################################################################################
+# first half of screen 3/4: first 3 buttons logic
 def on_button1_click():
-    file_path = filedialog.askopenfilename(filetypes=[('MAT files', '*.mat')])
+    file_path = filedialog.askopenfilename(filetypes=[('MATLAB .mat File', '*.mat')])
     if file_path:
         file_name = os.path.basename(file_path)
-        button1.config(text=f'gotten {file_name}&listening')
-        button1.config(state=tkinter.DISABLED)
-        button2.config(state=tkinter.DISABLED)
+        button1.config(text=f'((👂)){file_name}')
 
-        mat_contents = sio.loadmat(file_path)
-        reading = mat_contents['Biotrace'][2:]
-        py_reading = numpy.transpose(reading)
-        numpy.savetxt("serverin.txt", py_reading, delimiter='\t', fmt='%.10e')
+        mat_contents = scipy.io.loadmat(file_path)
+        reading = mat_contents['Biotrace'][2:4]
+        py_reading = np.transpose(reading)
+        np.savetxt('serverin.txt', py_reading, delimiter='\t', fmt='%.10e')
         button3.invoke()
-
-
-# 2nd button logic
 def on_button2_click():
-    file_path = filedialog.askopenfilename(filetypes=[('Text files', '*.txt')])
+    file_path = filedialog.askopenfilename(filetypes=[('Text File', '*.txt')])
     if file_path:
         file_name = os.path.basename(file_path)
-        button2.config(text=f'gotten {file_name}&listening')
-        button1.config(state=tkinter.DISABLED)
-        button2.config(state=tkinter.DISABLED)
+        button2.config(text=f'((👂)){file_name}')
 
-        txt_contents = numpy.loadtxt(file_path)
-        numpy.savetxt("serverin.txt", txt_contents, delimiter='\t', fmt='%.10e')
+        txt_contents = np.loadtxt(file_path)
+        np.savetxt('serverin.txt', txt_contents, delimiter='\t', fmt='%.10e')
         button3.invoke()
-
-
-# 3rd button logic
-def on_button3_click(func_fig, func_ax, func_line, func_Y):
-    button3.config(text='listening')
+def on_button3_click():
+    button3.config(text=f'((👂))')
     button1.config(state=tkinter.DISABLED)
     button2.config(state=tkinter.DISABLED)
     button3.config(state=tkinter.DISABLED)
+    
+    update_graphs()
+def on_button4_click():
+    global play, reverse
+    play = True
+    reverse = True
+def on_button5_click():
+    global play, reverse
+    if not reverse:
+        play = not play
+    elif reverse:
+        play = True
+        reverse = False
+####################################################################################################
+# first half of screen 4/4: cmds
+app_object = tkinter.Tk()
+app_object.title(APP_OBJECT_NAME)
+app_object.state('zoomed')
+app_object.protocol("WM_DELETE_WINDOW", app_object.quit)
+button1 = tkinter.Button(app_object, text='m→t→✈→👂', command=on_button1_click,
+                        font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+button2 = tkinter.Button(app_object, text='t→✈→👂', command=on_button2_click,
+                        font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+button3 = tkinter.Button(app_object, text='👂', command=on_button3_click,
+                        font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+button4 = tkinter.Button(app_object, text='⏪', command=on_button4_click,
+                        font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+button5 = tkinter.Button(app_object, text='⏯️', command=on_button5_click,
+                        font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+button1.grid(row=0, column=0)
+button2.grid(row=0, column=1)
+button3.grid(row=0, column=2)
+button4.grid(row=0, column=3)
+button5.grid(row=0, column=4)
+sigma_spinbox_label = tkinter.Label(app_object, text='sigma')
+gdx_gain_spinbox_label = tkinter.Label(app_object, text='gdx_gain')
+threshold_spinbox_label = tkinter.Label(app_object, text='threshold (µV/sample)')
+pidm_spinbox_label = tkinter.Label(app_object, text='pidm')
+pg_compr_spinbox_label = tkinter.Label(app_object, text='pg compress factor')
+sigma_spinbox_label.grid(row=2, column=0)
+gdx_gain_spinbox_label.grid(row=2, column=1)
+threshold_spinbox_label.grid(row=2, column=2)
+pidm_spinbox_label.grid(row=2, column=3)
+pg_compr_spinbox_label.grid(row=2, column=4)
+sigma_spinbox=tkinter.Spinbox(app_object, textvariable=tkinter.DoubleVar(value=SIGMA0),
+                                from_=SPINBOX_MIN_VAL, to=SPINBOX_MAX_VAL, increment=SPINBOX_INCR_VAL, width=SPINBOX_WIDTH, format='%.2f',
+                                font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+gdx_gain_spinbox=tkinter.Spinbox(app_object, textvariable=tkinter.DoubleVar(value=GDX_GAIN0),
+                                from_=SPINBOX_MIN_VAL, to=SPINBOX_MAX_VAL, increment=SPINBOX_INCR_VAL, width=SPINBOX_WIDTH, format='%.2f',
+                                font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+threshold_spinbox=tkinter.Spinbox(app_object, textvariable=tkinter.DoubleVar(value=THRESHOLD0),
+                                from_=SPINBOX_MIN_VAL, to=SPINBOX_MAX_VAL, increment=SPINBOX_INCR_VAL, width=SPINBOX_WIDTH, format='%.2f',
+                                font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+pidm_spinbox=tkinter.Spinbox(app_object, textvariable=tkinter.DoubleVar(value=PIDM0),
+                                from_=SPINBOX_MIN_VAL, to=SPINBOX_MAX_VAL, increment=SPINBOX_INCR_VAL, width=SPINBOX_WIDTH, format='%.2f',
+                                font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+pg_compr_spinbox=tkinter.Spinbox(app_object, textvariable=tkinter.DoubleVar(value=PG_COMPR0),
+                                from_=SPINBOX_MIN_VAL, to=SPINBOX_MAX_VAL, increment=SPINBOX_INCR_VAL, width=SPINBOX_WIDTH, format='%.2f',
+                                font=(COMMON_FONT, COMMON_FONT_BASE_SIZE))
+sigma_spinbox.grid(row=3, column=0)
+gdx_gain_spinbox.grid(row=3, column=1)
+threshold_spinbox.grid(row=3, column=2)
+pidm_spinbox.grid(row=3, column=3)
+pg_compr_spinbox.grid(row=3, column=4)
 
-    def update_graph(frame):
-        global sigma, total_fr
-
-        func_fig.canvas.draw()
-        file_name = "serverout.txt"
-        file_lock_name = "lock"
-        with open(file_lock_name, "w"):  # lock up serverout.txt for server.py's changes of it
-            pass
-        try:
-            new_Y = numpy.genfromtxt(file_name, delimiter='\t')  # try generating from it, it may not even exist
-        except FileNotFoundError:
-            os.remove(file_lock_name)  # safely delete lock
-            exit(33)
-        os.remove(file_lock_name)  # delete lock when done properly using it
-        new_Y = new_Y.T
-
-        func_Y[0] = func_Y[0][len(new_Y[0]):]
-        func_Y[1] = func_Y[1][len(new_Y[1]):]
-        func_Y[0] = numpy.concatenate((func_Y[0], new_Y[0]))
-        func_Y[1] = numpy.concatenate((func_Y[1], new_Y[1]))
-        func_Y[2] = numpy.diff(func_Y[0])
-        func_Y[3] = numpy.diff(func_Y[1])
-        func_Y[4] = skew(gaussian_filter(func_Y[2], sigma=sfloat(sigma.get())))
-        func_Y[5] = gaussian_filter(func_Y[3], sigma=sfloat(sigma.get()))
-        func_Y[6] = alt_sign(func_Y[4], func_Y[5])
-        func_Y[7] = alt_sign(func_Y[5], func_Y[4])
-        func_Y[8] = pattern_id(func_Y[6], func_Y[7])
-
-        for i in range(8):
-            func_line[i].set_ydata(func_Y[i])
-        lat_ratio = int(sfloat(pidw.get()) / LATENCY)
-        if lat_ratio == 0:
-            lat_ratio = 1
-        if total_fr % lat_ratio == 0:
-            func_line[8].set_ydata(func_Y[8])
-            parse_instr(func_Y[8][-1])
-        total_fr += 1
-        for i in range(4):
-            for j in range(2):
-                func_ax[i, j].relim()
-                func_ax[i, j].autoscale_view()
-        return func_line
-
-    ani = FuncAnimation(func_fig, update_graph, frames=None, interval=int(LATENCY * 1000), blit=True,
-                        cache_frame_data=False)
-    func_fig.ani = ani
-
-
-########################################################################################################################
-# app starts now
-shown_frame = tkinter.Tk()
-shown_frame.title(APP_NAME)
-# create graph
-total_fr = 0
-fig, ax, line, Y = start_graph(shown_frame)
-
-# create buttons
-button1 = tkinter.Button(shown_frame, text='.mat->ASCII&mv&listen', command=on_button1_click,
-                         font=(DEFAULT_FONT, DEFAULT_FONT_SIZE))
-button2 = tkinter.Button(shown_frame, text='mvASCII&listen', command=on_button2_click,
-                         font=(DEFAULT_FONT, DEFAULT_FONT_SIZE))
-button3 = tkinter.Button(shown_frame, text='listen', command=lambda: on_button3_click(fig, ax, line, Y),
-                         font=(DEFAULT_FONT, DEFAULT_FONT_SIZE))
-button1.grid(row=0, column=0, columnspan=2)
-button2.grid(row=0, column=2, columnspan=2)
-button3.grid(row=0, column=4, columnspan=2)
-
-# create spinbox labels and spinboxes
-sigma_label = tkinter.Label(shown_frame, text='sigma')
-sdx_skew_label = tkinter.Label(shown_frame, text='sdx_skew')
-sensit_label = tkinter.Label(shown_frame, text='sensit (µV/sample)')
-pidw_label = tkinter.Label(shown_frame, text='pidw (s)')
-sigma = tkinter.Spinbox(shown_frame, from_=SPINBOX_START, to=SPINBOX_END, increment=SPINBOX_START, format="%.2f",
-                        textvariable=tkinter.DoubleVar(value=SIGMA0),
-                        font=(DEFAULT_FONT, DEFAULT_FONT_SIZE), width=SPINBOX_WIDTH)
-sdx_skew = tkinter.Spinbox(shown_frame, from_=SPINBOX_START, to=SPINBOX_END, increment=SPINBOX_START, format="%.2f",
-                           textvariable=tkinter.DoubleVar(value=SDX_SKEW0),
-                           font=(DEFAULT_FONT, DEFAULT_FONT_SIZE), width=SPINBOX_WIDTH)
-sensit = tkinter.Spinbox(shown_frame, from_=SPINBOX_START, to=SPINBOX_END, increment=SPINBOX_START, format="%.2f",
-                         textvariable=tkinter.DoubleVar(value=SENSIT0),
-                         font=(DEFAULT_FONT, DEFAULT_FONT_SIZE), width=SPINBOX_WIDTH)
-pidw = tkinter.Spinbox(shown_frame, from_=SPINBOX_START, to=SPINBOX_END, increment=SPINBOX_START, format="%.2f",
-                       textvariable=tkinter.DoubleVar(value=PIDW0),
-                       font=(DEFAULT_FONT, DEFAULT_FONT_SIZE), width=SPINBOX_WIDTH)
-sigma_label.grid(row=2, column=0)
-sdx_skew_label.grid(row=2, column=1)
-sensit_label.grid(row=2, column=2)
-pidw_label.grid(row=2, column=5)
-sigma.grid(row=3, column=0)
-sdx_skew.grid(row=3, column=1)
-sensit.grid(row=3, column=2)
-pidw.grid(row=3, column=5)
-
-# create keyboard
-keys = numpy.array([
-    ["ζζζ", "ζζζ", "zZ'", ",;=", ".:?", "βββ", "βββ"],
-    ["ζζζ", "aA1", "bB2", "cC3", "dD4", "eE5", "βββ"],
-    ["ααα", "fF6", "gG7", "hH8", "iI9", "jJ0", "λλλ"],
-    ["ααα", "kK*", "lL+", "mM#", "nN-", "oO_", "λλλ"],
-    ["ααα", "pP(", "qQ)", "rR&", "sS!", "tT£", "λλλ"],
-    ["σσσ", "uU$", "vV€", "wW/", "xX\\", "yY”", "^^^"],
-    ["σσσ", "σσσ", "  @", "  @", "<<<", "↓↓↓", ">>>"]
-])
-mode = 0
-curs = [3, 3]
-
-
-def update_captions():
-    for i in range(7):
-        for j in range(7):
-            buttons[i][j].config(text=keys[i][j][mode], bg='SystemButtonFace')
+init_graphs()
+####################################################################################################
+# second half of screen
+def on_vk_press(vk):
+    if len(vk) == 1:
+        text_widget.insert('insert', vk)
+    if vk == '<-':
+        vk_msg = text_widget.get(1.0, 'end')
+        text_widget.delete(1.0, 'end')
+        vk_msg = vk_msg[:-1]
+        if vk_msg and vk_msg[-1] == '~':
+            vk_msg = vk_msg[:-1]
+            while vk_msg and vk_msg[-1] != '~':
+                vk_msg = vk_msg[:-1]
+        text_widget.insert('end', vk_msg[:-1])
+    if vk == 'Áno':
+        text_widget.insert('insert', '~Áno.~')
+    if vk == 'Nie':
+        text_widget.insert('insert', '~Nie.~')
+    if vk == 'ZZ':
+        text_widget.insert('insert', '~Začať znova.~')
+    if vk == 'NS':
+        text_widget.insert('insert', '~Nové slovo.~')
+    if vk == 'NE':
+        text_widget.insert('insert', '~Nesprávne.~')
+    if vk == 'UK':
+        text_widget.insert('insert', '~Ukončiť.~')
+    text_widget.see('insert')
+def update_vks_colour():
+    for i in range(len(vk_captions)):
+        for j in range(len(vk_captions[0])):
             if i == curs[0] and j == curs[1]:
-                buttons[i][j].config(bg='red')
-
-
-def parse_letter(gotten):
-    global mode
-    curr_row, curr_col = text_box.index(tkinter.INSERT).split('.')
-    curr_row, curr_col = int(curr_row), int(curr_col)
-    if gotten not in 'λβζασ<↓>^':
-        text_box.insert(tkinter.INSERT, gotten)
-    if gotten == 'λ':
-        text_box.insert(tkinter.INSERT, '\n')
-    if gotten == 'β':
-        text = text_box.get(1.0, tkinter.END)
-        text_box.delete(1.0, tkinter.END)
-        text_box.insert(tkinter.END, text[:-2])  # TODO: instead of deleting last letter, delete last letter before ][
-    if gotten == 'ζ':
-        mode = 0
-    if gotten == 'α':
-        mode = 2
-    if gotten == 'σ':
-        mode = 1
-    if gotten == '<':
-        text_box.mark_set(tkinter.INSERT, f'{curr_row}.{curr_col - 1}')
-    if gotten == '↓':
-        text_box.mark_set(tkinter.INSERT, f'{curr_row + 1}.{curr_col}')
-    if gotten == '>':
-        text_box.mark_set(tkinter.INSERT, f'{curr_row}.{curr_col + 1}')
-    if gotten == '^':
-        text_box.mark_set(tkinter.INSERT, f'{curr_row - 1}.{curr_col}')
-    update_captions()
-    text_box.see(tkinter.INSERT)
-
-
-entire_right = tkinter.Frame(shown_frame)
-entire_right.grid(row=0, column=6, rowspan=4)
-buttons = []
-for _ in range(7):
-    btn_row = []
-    for __ in range(7):
-        btn = tkinter.Button(entire_right, command=lambda i=_, j=__: parse_letter(keys[i][j][mode]),
-                             font=(DEFAULT_FONT, DEFAULT_FONT_SIZE * 2), width=3)
-        btn.grid(row=_, column=__)
-        btn_row.append(btn)
-    buttons.append(btn_row)
-update_captions()
-
-
-def parse_instr(instr):
+                vks[i][j].config(bg='red')
+            else:
+                vks[i][j].config(bg='SystemButtonFace')
+def init_virtkeys():
+    global vk_captions, curs, vks
+    vk_captions = [
+        ['A', 'B', 'C', 'D', '  ', '<-'],
+        ['E', 'F', 'G', 'H', '  ', '  '],
+        ['I', 'J', 'K', 'L', 'M', 'N'],
+        ['O', 'P', 'Q', 'R', 'S', 'T'],
+        ['U', 'V', 'W', 'X', 'Y', 'Z'],
+        ['Áno', 'Nie', 'ZZ', 'NS', 'NE', 'UK']
+    ]
+    curs = [2,2]
+    vks = []
+    for _ in range(len(vk_captions)):
+        vks_row = []
+        for __ in range(len(vk_captions[0])):
+            vk = tkinter.Button(large_right_frame, text = vk_captions[_][__], command=lambda i=_, j=__: on_vk_press(vk_captions[i][j]),
+                                 font=(COMMON_FONT, COMMON_FONT_BASE_SIZE * 2), width=3)
+            vk.grid(row=_, column=__)
+            vks_row.append(vk)
+        vks.append(vks_row)
+    update_vks_colour()
+def on_pid_instr(instr):
     if instr == -3:
-        parse_letter('β')
+        on_vk_press('<-')
     if instr == -2:
-        buttons[curs[0]][curs[1]].invoke()
-    if instr == 1 and curs[1] > 0:
+        vks[curs[0]][curs[1]].invoke()
+    if instr == 1 and curs[1] >= 1:
         curs[1] -= 1
-    if instr == 2 and curs[1] < 6:
+    if instr == 2 and curs[1] <= len(vk_captions[0])-2:
         curs[1] += 1
-    if instr == 3 and curs[0] < 6:
+    if instr == 3 and curs[0] <= len(vk_captions)-2:
         curs[0] += 1
-    if instr == 4 and curs[0] > 0:
+    if instr == 4 and curs[0] >= 1:
         curs[0] -= 1
-    update_captions()
-    return instr
-
-
-text_box = tkinter.Text(entire_right, height=4, width=24, font=(DEFAULT_FONT, DEFAULT_FONT_SIZE * 2))
-text_box.focus_set()
-text_box.grid(row=7, column=0, columnspan=7)
-shown_frame.mainloop()
+    update_vks_colour()
+large_right_frame = tkinter.Frame(app_object)
+large_right_frame.grid(row=0, column=6, rowspan=4)
+init_virtkeys()
+text_widget = tkinter.Text(large_right_frame, height=6, width=21, font=(COMMON_FONT, COMMON_FONT_BASE_SIZE * 2))
+text_widget.grid(row=6, column=0, columnspan=len(vk_captions[0]))
+app_object.mainloop()
