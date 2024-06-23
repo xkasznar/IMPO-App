@@ -13,7 +13,7 @@ import numpy as np
 
 # graph math consts and pg compress factor
 SIGMA0 = 32.0
-GDX_GAIN0 = 2.3
+GDX_GAIN0 = 1.3
 THRESHOLD0 = 0.8 # µV/sample
 PIDM0 = 3
 PG_COMPR0 = 16
@@ -27,7 +27,7 @@ SECONDS_PER_BUFFER = 10
 ROWS_PER_BUFFER = int(ROWS_PER_SECOND * SECONDS_PER_BUFFER)
 
 # app name, common font, spinbox and turtle consts
-APP_OBJECT_NAME = 'IMPO App v0.975'
+APP_OBJECT_NAME = 'IMPO App v0.976'
 COMMON_FONT = 'TkDefaultFont'
 COMMON_FONT_BASE_SIZE = 20
 SPINBOX_MIN_VAL = 0.01
@@ -51,7 +51,7 @@ YSECTIONS = 7
 STATIC_TICK_GRAPHS = {(4,0): [-1,1,3], (4,1): [-1,1,3], (5,0): [-3,4,8]}
 
 ####################################################################################################
-# first half of screen 1/4: graph maths
+# first half of screen aspect 1/3: graph maths
 # in: entered string Q number in either spinbox
 # out: if parseable and within range converted float Q, if not fallback float Q
 def sfloat(s):
@@ -134,7 +134,7 @@ def pid(arr_x, arr_y, arr_bl):
         arr_it -= samples
     return new_arr
 ####################################################################################################
-# first half of screen 2/4: graph materialisation
+# first half of screen aspect 2/3: graph materialisation
 def get_t_home(i, j):
     x = -TURTLE_WIDTH/2 + j * (GRAPH_WIDTH + TURTLE_PAD)
     y = TURTLE_HEIGHT/2 - (i+1) * (GRAPH_HEIGHT + TURTLE_PAD) + TURTLE_PAD*4/5
@@ -293,7 +293,7 @@ def update_graphs():
     turtle_screen.update()
     app_object.after(syncper, update_graphs)
 ####################################################################################################
-# first half of screen 3/4: first 3 buttons logic
+# first half of screen aspect 3/3: first 3 buttons logic
 def on_button1_click():
     file_path = filedialog.askopenfilename(filetypes=[('MATLAB .mat File', '*.mat')])
     if file_path:
@@ -330,7 +330,7 @@ def on_button5_click():
     global play
     play = not play
 ####################################################################################################
-# first half of screen 4/4: cmds
+# first half of screen pointcut
 app_object = tkinter.Tk()
 app_object.title(APP_OBJECT_NAME)
 app_object.state('zoomed')
@@ -383,7 +383,7 @@ pg_compr_spinbox.grid(row=3, column=4)
 
 init_graphs()
 ####################################################################################################
-# second half of screen
+# second half of screen aspect
 def on_vk_press(vkc):
     if len(vkc) == 1 and vkc in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
         text_widget.insert('insert', vkc)
@@ -451,6 +451,8 @@ def on_pid_instr(instr):
     if instr == 4 and curs[0] >= 1:
         curs[0] -= 1
     update_vks_colour()
+####################################################################################################
+# second half of screen pointcut
 large_right_frame = tkinter.Frame(app_object)
 large_right_frame.grid(row=0, column=6, rowspan=4)
 init_virtkeys()
