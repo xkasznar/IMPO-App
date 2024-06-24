@@ -10,6 +10,7 @@ import os
 import time
 import scipy
 import numpy as np
+import winsound
 
 # graph math consts and pg compress factor
 SIGMA0 = 32.0
@@ -276,6 +277,7 @@ def update_graphs():
     pm = max(1,int(sfloat(pidm_spinbox.get())))
     if play and bankit % (ROWS_PER_PACKET*pm) == 0:
         on_pid_instr(d2da[5][0][-1])
+        winsound.Beep(6000, 500)
     t_professor.clear()
     t_pop_graphs(t_professor, d2da)
     t_tickscribe.clear()
