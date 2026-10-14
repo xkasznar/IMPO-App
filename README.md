@@ -1,3 +1,5 @@
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/c4fafe79-1b05-451d-bb09-51361fe8e3fc" />
+
 <img width="1920" height="1035" alt="{1F50A5C2-273F-4014-A817-FDC68AF7DC2C}" src="https://github.com/user-attachments/assets/1480faa6-dae6-46e0-aa9a-e288560fecc1" />
 
 EN:How to get IMPO App running?
